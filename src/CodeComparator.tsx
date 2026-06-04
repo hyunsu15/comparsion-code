@@ -279,15 +279,16 @@ const CodeComparator: React.FC = () => {
   // SSR 지원을 위해 초기값은 고정된 기본값으로 설정
   const [links, setLinks] = useState<CodeSourceSet>({ sourceA: '', sourceB: '' });
   const [filePresets, setFilePresets] = useState<Record<string, CodeSourceSet>>({});
-  const [isLoadingHttp, setIsLoadingHttp] = useState<boolean>(false);
-  const [isLoadingGit, setIsLoadingGit] = useState<boolean>(false);
-  const [httpError, setHttpError] = useState<string | null>(null);
-  const [gitError, setGitError] = useState<string | null>(null);
+  const [isLoadingA, setIsLoadingA] = useState<boolean>(false);
+  const [isLoadingB, setIsLoadingB] = useState<boolean>(false);
+  const [errorA, setErrorA] = useState<string | null>(null);
+  const [errorB, setErrorB] = useState<string | null>(null);
   
   const [codeA, setCodeA] = useState<string>('');
   const [codeB, setCodeB] = useState<string>('');
   const [isMounted, setIsMounted] = useState(false);
   const [activePlatform, setActivePlatform] = useState<'PB' | 'PB5'>('PB');
+  const [fontSize, setFontSize] = useState<number>(15);
   const [activePresetKey, setActivePresetKey] = useState<string>('');
 
   const [draftComment, setDraftComment] = useState<string>('');
@@ -700,6 +701,7 @@ const CodeComparator: React.FC = () => {
     setCodeA(localStorage.getItem('sourceA') ?? '');
     setCodeB(localStorage.getItem('sourceB') ?? '');
     setActivePlatform((localStorage.getItem('activePlatform') as 'PB' | 'PB5') ?? 'PB');
+    setFontSize(parseInt(localStorage.getItem('codeFontSize') ?? '15', 10));
     setActivePresetKey(localStorage.getItem('activePresetKey') ?? '');
 
     // 동적 파일 프리셋 로드
@@ -741,16 +743,21 @@ const CodeComparator: React.FC = () => {
     localStorage.setItem('activePresetKey', activePresetKey);
   }, [activePresetKey, isMounted]);
 
+  useEffect(() => {
+    if (!isMounted) return;
+    localStorage.setItem('codeFontSize', fontSize.toString());
+  }, [fontSize, isMounted]);
+
   const handleLoadAll = async () => {
     if (!links.sourceA || !links.sourceB) {
       alert('프리셋을 먼저 선택해주세요.');
       return;
     }
 
-    setIsLoadingHttp(true);
-    setIsLoadingGit(true);
-    setHttpError(null);
-    setGitError(null);
+    setIsLoadingA(true);
+    setIsLoadingB(true);
+    setErrorA(null);
+    setErrorB(null);
     setCodeA('');
     setCodeB('');
 
@@ -773,20 +780,20 @@ const CodeComparator: React.FC = () => {
         nextA = resA.value;
         setCodeA(nextA);
       } else {
-        setHttpError(getErrorMessage(resA.reason));
+        setErrorA(getErrorMessage(resA.reason));
       }
 
       if (resB.status === 'fulfilled') {
         nextB = resB.value;
         setCodeB(nextB);
       } else {
-        setGitError(getErrorMessage(resB.reason));
+        setErrorB(getErrorMessage(resB.reason));
       }
 
       saveLocally(nextA, nextB);
     } finally {
-      setIsLoadingHttp(false);
-      setIsLoadingGit(false);
+      setIsLoadingA(false);
+      setIsLoadingB(false);
       refreshThreads(); // 코드 로딩 후 즉시 마커 갱신
     }
   };
@@ -803,10 +810,14 @@ const CodeComparator: React.FC = () => {
     const isAlreadyHtml = code.trim().startsWith('<') && (code.includes('</') || code.includes('/>'));
     
     if (isAlreadyHtml) {
-      return <PBCode srcListTab ={code}/>
+      return (
+        <div style={{ fontSize: `${fontSize}px` }}>
+          <PBCode srcListTab ={code}/>
+        </div>
+      );
     }
 
-    return <CodeBlock code={code} lang={lang} onHighlight={handleHighlight} />;
+    return <CodeBlock code={code} lang={lang} onHighlight={handleHighlight} fontSize={fontSize} />;
   };
 
   return (
@@ -814,29 +825,43 @@ const CodeComparator: React.FC = () => {
       {/* 헤더 영역 최적화 */}
       <header className="border-b bg-white -mx-3 -mt-3 p-4 shadow-sm flex-shrink-0 flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-black text-slate-800 m-0 tracking-tighter">CODE COMPARISON</h1>
-          <p className="text-slate-500 text-[11px] mt-0.5 font-bold m-0 uppercase opacity-70">Legacy PB vs New PB5 (Git)</p>
+          <h1 className="text-xl font-black text-slate-800 m-0 tracking-tighter">PB-5세대 비교검증</h1>
         </div>
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
-          <button 
-            onClick={() => setActivePlatform('PB')}
-            className={`px-6 py-1.5 rounded-lg text-[14px] font-black transition-all ${activePlatform === 'PB' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'text-slate-400 hover:text-indigo-500'}`}
-          >
-            PB
-          </button>
-          <button 
-            onClick={() => setActivePlatform('PB5')}
-            className={`px-6 py-1.5 rounded-lg text-[14px] font-black transition-all ${activePlatform === 'PB5' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'text-slate-400 hover:text-emerald-500'}`}
-          >
-            PB5
-          </button>
+        <div className="flex items-center gap-4">
+          {/* 폰트 조절 UI */}
+          <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 shadow-inner">
+            <label className="text-[11px] font-black text-slate-500 uppercase">Font Size</label>
+            <input 
+              type="number" 
+              min="14" 
+              value={fontSize} 
+              onChange={(e) => setFontSize(Math.max(14, parseInt(e.target.value) || 14))}
+              className="w-12 bg-transparent border-none text-sm font-bold text-slate-700 focus:ring-0 p-0 text-center"
+            />
+            <span className="text-[11px] font-bold text-slate-400">px</span>
+          </div>
+
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
+            <button 
+              onClick={() => setActivePlatform('PB')}
+              className={`px-6 py-1.5 rounded-lg text-[14px] font-black transition-all ${activePlatform === 'PB' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'text-slate-400 hover:text-indigo-500'}`}
+            >
+              PB
+            </button>
+            <button 
+              onClick={() => setActivePlatform('PB5')}
+              className={`px-6 py-1.5 rounded-lg text-[14px] font-black transition-all ${activePlatform === 'PB5' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'text-slate-400 hover:text-emerald-500'}`}
+            >
+              PB5
+            </button>
+          </div>
         </div>
       </header>
 
       {/* 비교 세트 선택 */}
       <div className="px-4 py-3 border rounded-xl bg-indigo-700 flex flex-col gap-3 shadow-lg flex-shrink-0 text-white">
         <div className="flex items-center gap-3">
-          <label className="text-xs font-black whitespace-nowrap m-0 opacity-80 uppercase">Preset:</label>
+          <label className="text-xs font-black whitespace-nowrap m-0 opacity-80 uppercase">소스선택</label>
           <select 
             className="flex-1 p-2 border-0 rounded bg-white text-gray-900 text-sm font-semibold focus:ring-4 focus:ring-indigo-300 outline-none" 
             onChange={(e) => {
@@ -858,9 +883,9 @@ const CodeComparator: React.FC = () => {
           <button 
             onClick={handleLoadAll}
             className="bg-white text-indigo-700 px-6 py-2 rounded hover:bg-indigo-50 transition font-bold text-sm shadow-sm disabled:bg-gray-300 disabled:text-gray-500" 
-            disabled={isLoadingHttp || isLoadingGit}
+            disabled={isLoadingA || isLoadingB}
           >
-            {isLoadingHttp || isLoadingGit ? 'Loading...' : 'Load all sources'}
+            {isLoadingA || isLoadingB ? 'Loading...' : 'Open'}
           </button>
           <button 
             onClick={() => {
@@ -886,7 +911,7 @@ const CodeComparator: React.FC = () => {
             <h3 className="p-2 text-xs flex justify-between items-center bg-blue-600 text-white m-0 sticky top-0 z-20 flex-shrink-0">
               <div className="flex flex-col gap-1 min-w-0 flex-1 mr-4">
                 <div className="flex items-center gap-2">
-                  <span className="font-bold whitespace-nowrap">PB 코드 (HTTP)</span>
+                  <span className="font-bold whitespace-nowrap">PB 코드</span>
                   <button 
                     onClick={() => toggleFoldAll('A')}
                     className="px-2 py-0.5 bg-blue-700 hover:bg-blue-800 rounded border border-blue-400/30 text-[10px] font-bold transition-colors"
@@ -909,13 +934,13 @@ const CodeComparator: React.FC = () => {
               className="flex-1 overflow-auto text-[15px] font-mono min-h-0 w-full border-r border-slate-200"
             >
               <div className="w-full text-slate-900">
-                {renderCodeContent(codeA, langA, isLoadingHttp, httpError)}
+                {renderCodeContent(codeA, langA, isLoadingA, errorA)}
               </div>
             </div>
           </div>
-          {httpError && (
+          {errorA && (
             <div className="bg-red-50 text-red-600 text-[11px] p-2 border-t border-red-100 font-bold flex-shrink-0">
-              ⚠️ {httpError}
+              ⚠️ {errorA}
             </div>
           )}
         </div>
@@ -926,7 +951,7 @@ const CodeComparator: React.FC = () => {
             <h3 className="p-2 text-xs flex justify-between items-center bg-green-600 text-white m-0 sticky top-0 z-20 flex-shrink-0">
               <div className="flex flex-col gap-1 min-w-0 flex-1 mr-4">
                 <div className="flex items-center gap-2">
-                  <span className="font-bold whitespace-nowrap">PB5 코드 (Git)</span>
+                  <span className="font-bold whitespace-nowrap">PB5 코드</span>
                   <button 
                     onClick={() => toggleFoldAll('B')}
                     className="px-2 py-0.5 bg-green-700 hover:bg-green-800 rounded border border-green-400/30 text-[10px] font-bold transition-colors"
@@ -949,13 +974,13 @@ const CodeComparator: React.FC = () => {
               className="flex-1 overflow-auto text-[15px] font-mono min-h-0 w-full"
             >
               <div className="w-full text-slate-900">
-                {renderCodeContent(codeB, langB, isLoadingGit, gitError)}
+                {renderCodeContent(codeB, langB, isLoadingB, errorB)}
               </div>
             </div>
           </div>
-          {gitError && (
+          {errorB && (
             <div className="bg-red-50 text-red-600 text-[11px] p-2 border-t border-red-100 font-bold flex-shrink-0">
-              ⚠️ {gitError}
+              ⚠️ {errorB}
             </div>
           )}
         </div>

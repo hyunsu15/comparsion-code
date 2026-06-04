@@ -4,6 +4,7 @@ type CodeBlockProps = {
   code: string;
   lang: string;
   onHighlight?: () => void;
+  fontSize?: number;
 };
 
 type Highlighter = {
@@ -75,7 +76,7 @@ const getHighlighter = (() => {
   };
 })();
 
-export default function CodeBlock({ code, lang, onHighlight }: CodeBlockProps) {
+export default function CodeBlock({ code, lang, onHighlight, fontSize = 15 }: CodeBlockProps) {
   const [html, setHtml] = useState<string>('');
   const [hasError, setHasError] = useState(false);
 
@@ -120,19 +121,26 @@ export default function CodeBlock({ code, lang, onHighlight }: CodeBlockProps) {
 
   return (
     <div
+      style={{ 
+        '--code-font-size': `${fontSize}px`,
+        fontSize: `${fontSize}px` // 자식 요소들이 상속받을 수 있도록 기본 폰트 크기 설정
+      } as React.CSSProperties}
       className="
       w-max min-w-full
 [&_pre]:!bg-transparent
 [&_pre]:m-0
 [&_pre]:p-4
 [&_pre]:overflow-visible
+[&_pre]:!text-[length:var(--code-font-size)] // Shiki 생성 pre 태그 폰트 강제 적용
 
 [&_code]:flex
 [&_code]:flex-col
+[&_code]:!text-[length:var(--code-font-size)] // Shiki 생성 code 태그 폰트 강제 적용
 
 [&_.line]:flex
-[&_.line]:min-h-[1.5rem]
-[&_.line]:w-full [&_.line]:text-[15px]
+[&_.line]:min-h-[1.4em] // 폰트 크기에 따라 유동적으로 높이 조절
+[&_.line]:w-full
+[&_.line]:text-[length:var(--code-font-size)]
 
 [&_.line::before]:content-[attr(data-line)]
 [&_.line::before]:inline-block
