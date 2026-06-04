@@ -16,6 +16,13 @@ const getErrorMessage = (error: unknown): string => (
   error instanceof Error ? error.message : String(error)
 );
 
+const formatDateTime = (dateInput: string | number | Date) => {
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
 const getSmartPosition = (clientX: number, clientY: number) => {
   return { x: clientX - 160, y: clientY - 100 };
 };
@@ -473,7 +480,7 @@ const CodeComparator: React.FC = () => {
               id: -thread.id, // 가상 ID
               writer_id: thread.writer_id || 'pb',
               content: thread.content || '',
-              created_at: thread.created_at || new Date().toLocaleString()
+              created_at: thread.created_at || new Date().toISOString()
             };
 
             // 서버에서 가져온 메시지 중 본문과 중복되는 내용이 있다면 제외하고 나머지를 댓글(replies)로 취급
@@ -561,7 +568,7 @@ const CodeComparator: React.FC = () => {
         id: -activeThread.thread.id,
         writer_id: activeThread.thread.writer_id || 'pb',
         content: activeThread.thread.content || '',
-        created_at: activeThread.thread.created_at || new Date().toLocaleString()
+        created_at: activeThread.thread.created_at || new Date().toISOString()
       };
 
       const replies = msgs.filter(m => m.content !== activeThread.thread.content);
@@ -970,7 +977,7 @@ const CodeComparator: React.FC = () => {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-0.5">
                           <span className={`font-black ${isRoot ? 'text-[16px]' : 'text-[14px]'} text-slate-900`}>{msg.writer_id.toUpperCase()}</span>
-                          <span className="text-[11px] text-slate-400 font-bold tracking-tight">{msg.created_at}</span>
+                          <span className="text-[11px] text-slate-400 font-bold tracking-tight">{formatDateTime(msg.created_at)}</span>
                         </div>
                         <div className={`${isRoot ? 'text-[15px] text-slate-800' : 'text-[14px] text-slate-700'} leading-relaxed break-words`}>
                   

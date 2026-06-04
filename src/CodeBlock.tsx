@@ -98,7 +98,6 @@ const getHighlighter = (() => {
   };
 })();
 
-export default function CodeBlock({ code, lang, onHighlight, fontSize = 15 }: CodeBlockProps) {
 export default function CodeBlock({ 
   code, 
   lang, 
@@ -205,7 +204,7 @@ export default function CodeBlock({
               const { lineNum, tokens: lineTokens } = lineData;
               const isMethodStart = methods.some(m => m.line === lineNum);
               const isFolded = foldedLines.has(lineNum);
-              const thread = threads.find(t => t.line_number === lineNum);
+              const lineThreads = threads.filter(t => t.line_number === lineNum);
 
               return (
                 <div
@@ -217,24 +216,30 @@ export default function CodeBlock({
                   className="line flex hover:bg-slate-50 transition-colors"
                   style={{ height: `${lineHeight}px`, lineHeight: `${lineHeight}px`, cursor: isMethodStart ? 'pointer' : 'default' }}
                 >
-                  {/* Line Number & Indicators */}
-                  <div className="w-16 flex-shrink-0 flex items-center justify-end pr-4 mr-4 border-r border-gray-200 text-gray-400 select-none text-[12px] font-mono">
-                    {thread && (
-                      <div 
-                        onClick={(e) => { e.stopPropagation(); onMarkerClick?.(thread.id, e.clientX, e.clientY); }}
-                        className={`w-2 h-2 rounded-full mr-2 ${thread.status === 'RESOLVED' ? 'bg-slate-300' : 'bg-indigo-500 animate-pulse'}`}
-                      />
+                  {/* Line Number & Indicators (Gutter) */}
+                  <div className="w-20 flex-shrink-0 flex items-center justify-end pr-4 mr-4 border-r border-gray-200 text-gray-400 select-none text-[12px] font-mono relative">
+                    {/* Folding Marker - Moved to Gutter to prevent indent shift */}
+                    {isMethodStart && (
+                      <span className="absolute left-2 text-blue-500 font-bold text-[10px]">
+                        {isFolded ? '▶' : '▼'}
+                      </span>
                     )}
+                    
+                    <div className="flex gap-0.5 items-center mr-1.5 overflow-hidden">
+                      {lineThreads.map(thread => (
+                        <div 
+                          key={thread.id}
+                          onClick={(e) => { e.stopPropagation(); onMarkerClick?.(thread.id, e.clientX, e.clientY); }}
+                          className={`w-2 h-2 rounded-full flex-shrink-0 cursor-pointer ${thread.status === 'RESOLVED' ? 'bg-slate-300' : 'bg-indigo-500 animate-pulse'}`}
+                          title={`Thread #${thread.id}`}
+                        />
+                      ))}
+                    </div>
                     {lineNum}
                   </div>
 
-                  {/* Code Tokens */}
-                  <div className="flex items-center whitespace-pre pr-4">
-                    {isMethodStart && (
-                      <span className="mr-2 text-blue-500 font-bold text-[11px] bg-blue-50 px-1 rounded">
-                        {isFolded ? '[ + folded ]' : '[ - ]'}
-                      </span>
-                    )}
+                  {/* Code Tokens - Original Indentation Preserved */}
+                  <div className="flex items-center whitespace-pre pr-4" style={{ tabSize: 4 }}>
                     {lineTokens.map((token: any, tIdx: number) => (
                       <span 
                         key={tIdx} 
@@ -247,6 +252,12 @@ export default function CodeBlock({
                         {token.content}
                       </span>
                     ))}
+                    {/* Folded hint displayed AFTER the code line */}
+                    {isFolded && (
+                      <span className="ml-4 text-blue-400 text-[11px] italic bg-blue-50 px-2 rounded-full border border-blue-100">
+                        ... method folded
+                      </span>
+                    )}
                   </div>
                 </div>
               );
