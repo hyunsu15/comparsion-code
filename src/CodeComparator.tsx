@@ -2,6 +2,7 @@
 import LINK_PRESETS from './Link';
 import type { CodeSourceSet } from './FileLink';
 import CodeBlock from './CodeBlock';
+import type { CodeBlockHandle } from './CodeBlock';
 import PBCode from './PBCode';
 import { mockPbCall } from './mock/pbCodeCall';
 import { discussionService } from './discussionService';
@@ -324,8 +325,8 @@ const CodeComparator: React.FC = () => {
   const [foldedB, setFoldedB] = useState<Set<number>>(new Set());
 
   // 스크롤 제어를 위한 Ref 추가
-  const scrollRefA = React.useRef<HTMLDivElement>(null);
-  const scrollRefB = React.useRef<HTMLDivElement>(null);
+  const scrollRefA = React.useRef<any>(null);
+  const scrollRefB = React.useRef<any>(null);
   const commentTextRef = React.useRef<HTMLTextAreaElement>(null);
 
   // 드래그 관련 상태
@@ -419,8 +420,11 @@ const CodeComparator: React.FC = () => {
       
       // 한쪽이 벽에 닿아도 다른 쪽은 계속 이동할 수 있도록 delta 값을 직접 더해줌
       // 브라우저가 범위 밖의 값은 자동으로 최소/최대치로 클램핑(Clamping) 처리함
-      if (scrollRefA.current) scrollRefA.current.scrollTop += delta;
-      if (scrollRefB.current) scrollRefB.current.scrollTop += delta;
+      const elA = scrollRefA.current?.getScrollElement?.() || scrollRefA.current;
+      const elB = scrollRefB.current?.getScrollElement?.() || scrollRefB.current;
+
+      if (elA) elA.scrollTop += delta;
+      if (elB) elB.scrollTop += delta;
     }
   }, [isSyncEnabled]);
 
@@ -430,7 +434,9 @@ const CodeComparator: React.FC = () => {
     if (!isSyncEnabled || isSyncingRef.current || hoveredSide === source) return;
 
     isSyncingRef.current = true;
-    const target = source === 'A' ? scrollRefB.current : scrollRefA.current;
+    const targetHandle = source === 'A' ? scrollRefB.current : scrollRefA.current;
+    const target = targetHandle?.getScrollElement?.() || targetHandle;
+
     if (target) {
       // 스크롤바를 직접 드래그할 때는 저장된 오프셋을 유지하며 강제 이동
       const currentScrollTop = e.currentTarget.scrollTop;
@@ -491,18 +497,22 @@ const CodeComparator: React.FC = () => {
   }, [methodsA, methodsB]);
 
 
-  const scrollToLine = useCallback((ref: React.RefObject<HTMLDivElement | null>, line: number) => {
+  const scrollToLine = useCallback((ref: React.RefObject<any>, line: number) => {
     if (!ref.current) return;
-    const lineElement = ref.current.querySelector(`[data-line="${line}"]`) as HTMLElement;
-    if (lineElement) {
-      lineElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // 시각적 피드백을 위해 잠시 강조
-      lineElement.style.backgroundColor = 'rgba(255, 255, 0, 0.3)';
-      setTimeout(() => {
-        if (lineElement) {
-          lineElement.style.backgroundColor = 'transparent';
-        }
-      }, 2000);
+
+    // 1. 데이터 기반 점프 (Virtualizer가 있는 CodeBlock인 경우)
+    if (typeof ref.current.scrollToLine === 'function') {
+      ref.current.scrollToLine(line);
+    } else {
+      // 2. 레거시 DOM 기반 점프 (PBCode 등 일반 div인 경우)
+      const lineElement = ref.current.querySelector(`[data-line="${line}"]`) as HTMLElement;
+      if (lineElement) {
+        lineElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        lineElement.style.backgroundColor = 'rgba(255, 255, 0, 0.3)';
+        setTimeout(() => {
+          if (lineElement) lineElement.style.backgroundColor = 'transparent';
+        }, 2000);
+      }
     }
   }, []);
 
@@ -649,7 +659,7 @@ const CodeComparator: React.FC = () => {
     const blockParts = content.split(/(```[\s\S]*?```)/g);
     return blockParts.map((blockPart, bIdx) => {
       if (blockPart.startsWith('```') && blockPart.endsWith('```')) {
-        const code = blockPart.slice(3, -3).trim();
+        const code = blockPart.slice(3, -3);
         return (
           <div key={`b-${bIdx}`} className="my-2 p-3 bg-[#1e1e1e] rounded-lg font-mono text-[13px] text-slate-300 border border-slate-800 overflow-x-auto whitespace-pre shadow-inner">
             {code}
@@ -828,9 +838,25 @@ const CodeComparator: React.FC = () => {
         onWheel={onWheel}
         onMarkerClick={(id, x, y) => {
           const thread = threadsB.find(t => t.id === id);
-          if (thread) {
+          if (thread && activePresetKey) {
             discussionService.getMessages(activePresetKey, id).then(msgs => {
-              setActiveThread({ thread, messages: msgs, x: x - 160, y: y - 100 });
+              // 스레드 본문 내용을 첫 번째 메시지로 구성 (id는 가상으로 설정)
+              const rootMsg: DiscussionMessage = {
+                id: -thread.id,
+                writer_id: thread.writer_id || 'pb',
+                content: thread.content || '',
+                created_at: thread.created_at || new Date().toISOString()
+              };
+
+              // 서버에서 가져온 메시지 중 본문과 중복되는 내용이 있다면 제외
+              const replies = msgs.filter(m => m.content !== thread.content);
+              
+              setActiveThread({ 
+                thread, 
+                messages: [rootMsg, ...replies], 
+                x: x - 160, 
+                y: y - 100 
+              });
             });
           }
         }}
@@ -911,8 +937,11 @@ const CodeComparator: React.FC = () => {
           <button 
             onClick={() => {
               // 동기화 시작 시점에 현재 두 창의 스크롤 차이(Offset)를 저장
-              if (!isSyncEnabled && scrollRefA.current && scrollRefB.current) {
-                syncOffsetRef.current = scrollRefB.current.scrollTop - scrollRefA.current.scrollTop;
+              const elA = scrollRefA.current?.getScrollElement?.() || scrollRefA.current;
+              const elB = scrollRefB.current?.getScrollElement?.() || scrollRefB.current;
+
+              if (!isSyncEnabled && elA && elB) {
+                syncOffsetRef.current = elB.scrollTop - elA.scrollTop;
               }
               setIsSyncEnabled(!isSyncEnabled);
             }}

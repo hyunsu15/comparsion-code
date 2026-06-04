@@ -23,6 +23,11 @@ type CodeBlockProps = {
   onWheel?: (e: React.WheelEvent<HTMLDivElement>) => void;
 };
 
+export interface CodeBlockHandle {
+  scrollToLine: (lineNum: number) => void;
+  getScrollElement: () => HTMLDivElement | null;
+}
+
 type Highlighter = {
   codeToHtml: (
     code: string,
@@ -101,7 +106,7 @@ const getHighlighter = (() => {
   };
 })();
 
-const CodeBlock = forwardRef<HTMLDivElement, CodeBlockProps>(({
+const CodeBlock = forwardRef<CodeBlockHandle, CodeBlockProps>(({
   code, 
   lang, 
   onHighlight, 
@@ -117,9 +122,21 @@ const CodeBlock = forwardRef<HTMLDivElement, CodeBlockProps>(({
 }, ref) => {
   const [tokens, setTokens] = useState<any[][]>([]);
   const [hasError, setHasError] = useState(false);
+  const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
   const internalRef = useRef<HTMLDivElement>(null);
 
-  useImperativeHandle(ref, () => internalRef.current!);
+  useImperativeHandle(ref, () => ({
+    scrollToLine: (lineNum: number) => {
+      const index = visibleLines.findIndex(l => l.lineNum === lineNum);
+      if (index !== -1) {
+        virtualizer.scrollToIndex(index, { align: 'center', behavior: 'smooth' });
+        // 시각적 피드백: 잠시 강조
+        setHighlightedLine(lineNum);
+        setTimeout(() => setHighlightedLine(null), 2000);
+      }
+    },
+    getScrollElement: () => internalRef.current
+  }));
 
   const lineHeight = Math.floor(fontSize * 1.5);
 
@@ -216,10 +233,11 @@ const CodeBlock = forwardRef<HTMLDivElement, CodeBlockProps>(({
                     }
                   }}
                   className="line flex hover:bg-slate-50 transition-colors absolute top-0 left-0 w-full"
-                  style={{ 
+                  style={{
                     height: `${virtualRow.size}px`, 
                     lineHeight: `${virtualRow.size}px`, 
                     cursor: isMethodStart ? 'pointer' : 'default',
+                    backgroundColor: highlightedLine === lineNum ? 'rgba(255, 255, 0, 0.3)' : undefined,
                     transform: `translateY(${virtualRow.start}px)`
                   }}
                 >
@@ -246,14 +264,20 @@ const CodeBlock = forwardRef<HTMLDivElement, CodeBlockProps>(({
                   </div>
 
                   {/* Code Tokens - Original Indentation Preserved */}
-                  <div className="flex items-center whitespace-pre pr-4" style={{ tabSize: 4 }}>
+                  <div 
+                    className="whitespace-pre pr-4 font-mono" 
+                    style={{ 
+                      tabSize: 4
+                    }}
+                  >
                     {lineTokens.map((token: any, tIdx: number) => (
                       <span 
                         key={tIdx} 
                         style={{ 
                           color: token.color,
-                          fontWeight: token.fontStyle === 1 ? 'bold' : 'normal',
-                          fontStyle: token.fontStyle === 2 ? 'italic' : 'normal'
+                          fontWeight: (token.fontStyle & 1) ? 'bold' : 'normal',
+                          fontStyle: (token.fontStyle & 2) ? 'italic' : 'normal',
+                          textDecoration: (token.fontStyle & 4) ? 'underline' : 'none'
                         }}
                       >
                         {token.content}
