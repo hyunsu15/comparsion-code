@@ -306,6 +306,9 @@ const CodeComparator: React.FC = () => {
   const [fontSize, setFontSize] = useState<number>(15);
   const [activePresetKey, setActivePresetKey] = useState<string>('');
 
+  const [splitOffset, setSplitOffset] = useState<number>(50); // 좌우 분할 비율 (15% ~ 85%)
+  const [isResizing, setIsResizing] = useState<boolean>(false);
+
   const [draftComment, setDraftComment] = useState<string>('');
 
   // 댓글 관련 상태
@@ -372,6 +375,32 @@ const CodeComparator: React.FC = () => {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDragging, handleMouseMove, handleMouseUp]);
+
+  // 가로 사이즈 조절 (Resizing) 로직
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const container = document.getElementById('main-split-container');
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const percentage = ((e.clientX - rect.left) / rect.width) * 100;
+        setSplitOffset(Math.max(15, Math.min(percentage, 85))); // 최소 15%, 최대 85% 제한
+      }
+    };
+    const onUp = () => setIsResizing(false);
+
+    if (isResizing) {
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      document.body.style.cursor = 'col-resize';
+    } else {
+      document.body.style.cursor = '';
+    }
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isResizing]);
 
   // 동기 스크롤 관련 상태
   const [isSyncEnabled, setIsSyncEnabled] = useState(false);
@@ -856,9 +885,15 @@ const CodeComparator: React.FC = () => {
       </div>
 
       {/* 메인 비교 영역 간격 조정 */}
-      <div className="grid grid-cols-2 gap-3 flex-1 min-h-0">
+      <div 
+        id="main-split-container"
+        className={`flex flex-1 min-h-0 relative ${isResizing ? 'select-none' : ''}`}
+      >
         {/* ?쇱そ ??*/}
-        <div className="flex flex-col gap-2 min-h-0">
+        <div 
+          style={{ width: `${splitOffset}%` }}
+          className="flex flex-col gap-2 min-h-0 pr-1"
+        >
           <div className="flex flex-col border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm flex-1 min-h-0 relative group">
             <h3 className="p-2 text-xs flex justify-between items-center bg-blue-600 text-white m-0 sticky top-0 z-20 flex-shrink-0">
               <div className="flex flex-col gap-1 min-w-0 flex-1 mr-4">
@@ -897,8 +932,19 @@ const CodeComparator: React.FC = () => {
           )}
         </div>
 
+        {/* 드래그 핸들 (Splitter) */}
+        <div 
+          onMouseDown={() => setIsResizing(true)}
+          className={`group w-3 cursor-col-resize flex-shrink-0 flex items-center justify-center transition-all ${isResizing ? 'bg-indigo-400/20' : 'hover:bg-indigo-200/30 bg-transparent'}`}
+        >
+          <div className={`w-1 h-16 rounded-full transition-all ${isResizing ? 'bg-indigo-600 scale-x-150' : 'bg-slate-300 group-hover:bg-indigo-400'}`} />
+        </div>
+
         {/* ?ㅻⅨ履???*/}
-        <div className="flex flex-col gap-2 min-h-0">
+        <div 
+          style={{ width: `${100 - splitOffset}%` }}
+          className="flex flex-col gap-2 min-h-0 pl-1"
+        >
           <div className="flex flex-col border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm flex-1 min-h-0 relative group">
             <h3 className="p-2 text-xs flex justify-between items-center bg-green-600 text-white m-0 sticky top-0 z-20 flex-shrink-0">
               <div className="flex flex-col gap-1 min-w-0 flex-1 mr-4">
