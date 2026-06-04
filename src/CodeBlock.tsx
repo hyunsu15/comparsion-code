@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { DiscussionThread } from './discussionService';
 
 interface MethodInfo {
@@ -98,7 +99,7 @@ const getHighlighter = (() => {
   };
 })();
 
-export default function CodeBlock({ 
+export default function CodeBlock({
   code, 
   lang, 
   onHighlight, 
@@ -113,8 +114,6 @@ export default function CodeBlock({
   const [tokens, setTokens] = useState<any[][]>([]);
   const [hasError, setHasError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [containerHeight, setContainerHeight] = useState(0);
 
   const lineHeight = Math.floor(fontSize * 1.5);
 
@@ -143,21 +142,6 @@ export default function CodeBlock({
     if (tokens.length > 0) onHighlight?.();
   }, [tokens, onHighlight]);
 
-  // 가상 스크롤을 위한 뷰포트 측정
-  useEffect(() => {
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setContainerHeight(entry.contentRect.height);
-      }
-    });
-    if (containerRef.current) observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, []);
-
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    setScrollTop(e.currentTarget.scrollTop);
-  };
-
   // 실제로 화면에 그려야 할 라인 계산 (접힌 라인 제외)
   const visibleLines = useMemo(() => {
     const lines: any[] = [];
@@ -178,16 +162,17 @@ export default function CodeBlock({
     return lines;
   }, [tokens, foldedLines, methods]);
 
-  const startIndex = Math.max(0, Math.floor(scrollTop / lineHeight) - 5);
-  const endIndex = Math.min(visibleLines.length, Math.ceil((scrollTop + containerHeight) / lineHeight) + 5);
-  
-  const offsetY = startIndex * lineHeight;
-  const totalHeight = visibleLines.length * lineHeight;
+  // TanStack Virtual 설정
+  const virtualizer = useVirtualizer({
+    count: visibleLines.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => lineHeight,
+    overscan: 10, // 상하 버퍼 라인 수
+  });
 
   return (
     <div
       ref={containerRef}
-      onScroll={handleScroll}
       style={{ 
         '--code-font-size': `${fontSize}px`,
         fontSize: `${fontSize}px`,
@@ -198,10 +183,12 @@ export default function CodeBlock({
       className="w-full"
     >
       {!hasError ? (
-        <div style={{ height: `${totalHeight}px`, position: 'relative', minWidth: 'max-content' }}>
-          <div style={{ transform: `translateY(${offsetY}px)` }}>
-            {visibleLines.slice(startIndex, endIndex).map((lineData) => {
-              const { lineNum, tokens: lineTokens } = lineData;
+        <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative', minWidth: 'max-content' }}>
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const lineData = visibleLines[virtualRow.index];
+            if (!lineData) return null;
+            
+            const { lineNum, tokens: lineTokens } = lineData;
               const isMethodStart = methods.some(m => m.line === lineNum);
               const isFolded = foldedLines.has(lineNum);
               const lineThreads = threads.filter(t => t.line_number === lineNum);
@@ -213,8 +200,13 @@ export default function CodeBlock({
                     if (e.shiftKey) onLineShiftClick?.(lineNum, e.clientX, e.clientY);
                     else if (isMethodStart) onFoldToggle?.(lineNum);
                   }}
-                  className="line flex hover:bg-slate-50 transition-colors"
-                  style={{ height: `${lineHeight}px`, lineHeight: `${lineHeight}px`, cursor: isMethodStart ? 'pointer' : 'default' }}
+                  className="line flex hover:bg-slate-50 transition-colors absolute top-0 left-0 w-full"
+                  style={{ 
+                    height: `${virtualRow.size}px`, 
+                    lineHeight: `${virtualRow.size}px`, 
+                    cursor: isMethodStart ? 'pointer' : 'default',
+                    transform: `translateY(${virtualRow.start}px)`
+                  }}
                 >
                   {/* Line Number & Indicators (Gutter) */}
                   <div className="w-20 flex-shrink-0 flex items-center justify-end pr-4 mr-4 border-r border-gray-200 text-gray-400 select-none text-[12px] font-mono relative">
@@ -261,8 +253,7 @@ export default function CodeBlock({
                   </div>
                 </div>
               );
-            })}
-          </div>
+          })}
         </div>
       ) : (
         <pre className="p-4 opacity-50 whitespace-pre">{code}</pre>
