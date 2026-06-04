@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { DiscussionThread } from './discussionService';
 
@@ -19,6 +19,8 @@ type CodeBlockProps = {
   onMarkerClick?: (threadId: number, x: number, y: number) => void;
   onFoldToggle?: (line: number) => void;
   onLineShiftClick?: (line: number, x: number, y: number) => void;
+  onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
+  onWheel?: (e: React.WheelEvent<HTMLDivElement>) => void;
 };
 
 type Highlighter = {
@@ -99,7 +101,7 @@ const getHighlighter = (() => {
   };
 })();
 
-export default function CodeBlock({
+const CodeBlock = forwardRef<HTMLDivElement, CodeBlockProps>(({
   code, 
   lang, 
   onHighlight, 
@@ -109,11 +111,15 @@ export default function CodeBlock({
   threads = [],
   onMarkerClick,
   onFoldToggle,
-  onLineShiftClick
-}: CodeBlockProps) {
+  onLineShiftClick,
+  onScroll: externalOnScroll,
+  onWheel: externalOnWheel
+}, ref) => {
   const [tokens, setTokens] = useState<any[][]>([]);
   const [hasError, setHasError] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const internalRef = useRef<HTMLDivElement>(null);
+
+  useImperativeHandle(ref, () => internalRef.current!);
 
   const lineHeight = Math.floor(fontSize * 1.5);
 
@@ -165,19 +171,22 @@ export default function CodeBlock({
   // TanStack Virtual 설정
   const virtualizer = useVirtualizer({
     count: visibleLines.length,
-    getScrollElement: () => containerRef.current,
+    getScrollElement: () => internalRef.current,
     estimateSize: () => lineHeight,
     overscan: 10, // 상하 버퍼 라인 수
   });
 
   return (
     <div
-      ref={containerRef}
+      ref={internalRef}
+      onScroll={externalOnScroll}
+      onWheel={externalOnWheel}
       style={{ 
         '--code-font-size': `${fontSize}px`,
         fontSize: `${fontSize}px`,
         position: 'relative',
         height: '100%',
+        minHeight: 0,
         overflow: 'auto'
       } as React.CSSProperties}
       className="w-full"
@@ -260,4 +269,6 @@ export default function CodeBlock({
       )}
     </div>
   );
-}
+});
+
+export default CodeBlock;

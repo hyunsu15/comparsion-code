@@ -305,6 +305,7 @@ const CodeComparator: React.FC = () => {
   const [activePlatform, setActivePlatform] = useState<'PB' | 'PB5'>('PB');
   const [fontSize, setFontSize] = useState<number>(15);
   const [activePresetKey, setActivePresetKey] = useState<string>('');
+  const [hoveredSide, setHoveredSide] = useState<'A' | 'B' | null>(null);
 
   const [splitOffset, setSplitOffset] = useState<number>(50); // 좌우 분할 비율 (15% ~ 85%)
   const [isResizing, setIsResizing] = useState<boolean>(false);
@@ -405,9 +406,16 @@ const CodeComparator: React.FC = () => {
   // 동기 스크롤 관련 상태
   const [isSyncEnabled, setIsSyncEnabled] = useState(false);
   const isSyncingRef = React.useRef(false);
+  const activeScrollSideRef = React.useRef<'A' | 'B' | null>(null);
+
+  const markActiveScrollSide = useCallback((source: 'A' | 'B') => (e: React.WheelEvent<HTMLDivElement>) => {
+    activeScrollSideRef.current = source;
+    e.stopPropagation();
+  }, []);
 
   const handleScroll = useCallback((source: 'A' | 'B') => (e: React.UIEvent<HTMLDivElement>) => {
     if (!isSyncEnabled || isSyncingRef.current) return;
+    if (activeScrollSideRef.current !== source && hoveredSide !== source) return;
 
     isSyncingRef.current = true;
     const target = source === 'A' ? scrollRefB.current : scrollRefA.current;
@@ -417,7 +425,7 @@ const CodeComparator: React.FC = () => {
     }
     
     window.requestAnimationFrame(() => { isSyncingRef.current = false; });
-  }, [isSyncEnabled]);
+  }, [isSyncEnabled, hoveredSide]);
 
   const extractMethods = useCallback((code: string, lang: string): MethodInfo[] => {
     const lines = code.split('\n');
@@ -468,7 +476,7 @@ const CodeComparator: React.FC = () => {
   }, [methodsA, methodsB]);
 
 
-  const scrollToLine = useCallback((ref: React.RefObject<HTMLDivElement>, line: number) => {
+  const scrollToLine = useCallback((ref: React.RefObject<HTMLDivElement | null>, line: number) => {
     if (!ref.current) return;
     const lineElement = ref.current.querySelector(`[data-line="${line}"]`) as HTMLElement;
     if (lineElement) {
@@ -760,7 +768,16 @@ const CodeComparator: React.FC = () => {
   const handleHighlight = useCallback(() => setHighlightCount(prev => prev + 1), []);
 
   // HTML 소스인지 판별 (단순 확장자 체크 또는 내용 체크)
-  const renderCodeContent = (code: string, lang: string, isLoading: boolean, error: string | null, side: 'A' | 'B') => {
+  const renderCodeContent = (
+    code: string, 
+    lang: string, 
+    isLoading: boolean, 
+    error: string | null, 
+    side: 'A' | 'B',
+    scrollRef: React.RefObject<HTMLDivElement | null>,
+    onScroll: (e: React.UIEvent<HTMLDivElement>) => void,
+    onWheel: (e: React.WheelEvent<HTMLDivElement>) => void
+  ) => {
     if (isLoading) return <div className="text-gray-400 font-mono text-xs p-4 animate-pulse">Loading source code...</div>;
     if (error) return <div className="font-mono text-xs p-4 italic text-red-500 font-bold">Load failed: {error}</div>;
     if (!code) return <div className="font-mono text-xs p-4 italic text-gray-400">Load source code.</div>;
@@ -770,7 +787,12 @@ const CodeComparator: React.FC = () => {
     
     if (isAlreadyHtml) {
       return (
-        <div style={{ fontSize: `${fontSize}px` }}>
+        <div 
+          ref={scrollRef}
+          onScroll={onScroll}
+          onWheel={onWheel}
+          style={{ fontSize: `${fontSize}px`, overflow: 'auto', height: '100%', minHeight: 0 }}
+        >
           <PBCode srcListTab ={code}/>
         </div>
       );
@@ -778,6 +800,7 @@ const CodeComparator: React.FC = () => {
 
     return (
       <CodeBlock 
+        ref={scrollRef}
         code={code} 
         lang={lang} 
         onHighlight={handleHighlight} 
@@ -786,6 +809,8 @@ const CodeComparator: React.FC = () => {
         foldedLines={side === 'A' ? foldedA : foldedB}
         threads={side === 'B' ? threadsB : []}
         onFoldToggle={(line) => toggleFold(side, line)}
+        onScroll={onScroll}
+        onWheel={onWheel}
         onMarkerClick={(id, x, y) => {
           const thread = threadsB.find(t => t.id === id);
           if (thread) {
@@ -915,13 +940,19 @@ const CodeComparator: React.FC = () => {
               </div>
             </h3>
             <div 
-              ref={scrollRefA}
-              onScroll={handleScroll('A')}
+              onMouseEnter={() => {
+                activeScrollSideRef.current = 'A';
+                setHoveredSide('A');
+              }}
+              onMouseLeave={() => {
+                if (activeScrollSideRef.current === 'A') activeScrollSideRef.current = null;
+                setHoveredSide(null);
+              }}
               onClick={handleCodeClick('A')}
-              className="flex-1 overflow-auto text-[15px] font-mono min-h-0 w-full border-r border-slate-200"
+              className="flex-1 text-[15px] font-mono min-h-0 w-full border-r border-slate-200 overflow-hidden"
             >
-              <div className="w-full text-slate-900">
-                {renderCodeContent(codeA, langA, isLoadingA, errorA, 'A')}
+              <div className="w-full h-full min-h-0 text-slate-900">
+                {renderCodeContent(codeA, langA, isLoadingA, errorA, 'A', scrollRefA, handleScroll('A'), markActiveScrollSide('A'))}
               </div>
             </div>
           </div>
@@ -966,13 +997,19 @@ const CodeComparator: React.FC = () => {
               </div>
             </h3>
             <div 
-              ref={scrollRefB}
-              onScroll={handleScroll('B')}
+              onMouseEnter={() => {
+                activeScrollSideRef.current = 'B';
+                setHoveredSide('B');
+              }}
+              onMouseLeave={() => {
+                if (activeScrollSideRef.current === 'B') activeScrollSideRef.current = null;
+                setHoveredSide(null);
+              }}
               onClick={handleCodeClick('B')}
-              className="flex-1 overflow-auto text-[15px] font-mono min-h-0 w-full"
+              className="flex-1 text-[15px] font-mono min-h-0 w-full overflow-hidden"
             >
-              <div className="w-full text-slate-900">
-                {renderCodeContent(codeB, langB, isLoadingB, errorB, 'B')}
+              <div className="w-full h-full min-h-0 text-slate-900">
+                {renderCodeContent(codeB, langB, isLoadingB, errorB, 'B', scrollRefB, handleScroll('B'), markActiveScrollSide('B'))}
               </div>
             </div>
           </div>
