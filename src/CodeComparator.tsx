@@ -406,22 +406,37 @@ const CodeComparator: React.FC = () => {
   // 동기 스크롤 관련 상태
   const [isSyncEnabled, setIsSyncEnabled] = useState(false);
   const isSyncingRef = React.useRef(false);
+  const syncOffsetRef = React.useRef(0); // 두 창의 스크롤 위치 차이 저장
   const activeScrollSideRef = React.useRef<'A' | 'B' | null>(null);
 
-  const markActiveScrollSide = useCallback((source: 'A' | 'B') => (e: React.WheelEvent<HTMLDivElement>) => {
-    activeScrollSideRef.current = source;
-    e.stopPropagation();
-  }, []);
+  const handleWheel = useCallback((source: 'A' | 'B') => (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!isSyncEnabled) return;
+
+    // 세로 스크롤 위주인 경우에만 커스텀 동기화 로직 적용 (가로 스크롤은 개별 동작 유지)
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      e.preventDefault();
+      const delta = e.deltaY;
+      
+      // 한쪽이 벽에 닿아도 다른 쪽은 계속 이동할 수 있도록 delta 값을 직접 더해줌
+      // 브라우저가 범위 밖의 값은 자동으로 최소/최대치로 클램핑(Clamping) 처리함
+      if (scrollRefA.current) scrollRefA.current.scrollTop += delta;
+      if (scrollRefB.current) scrollRefB.current.scrollTop += delta;
+    }
+  }, [isSyncEnabled]);
 
   const handleScroll = useCallback((source: 'A' | 'B') => (e: React.UIEvent<HTMLDivElement>) => {
-    if (!isSyncEnabled || isSyncingRef.current) return;
-    if (activeScrollSideRef.current !== source && hoveredSide !== source) return;
+    // 휠 이벤트로 인한 스크롤은 handleWheel에서 이미 처리했으므로, 
+    // 스크롤바 드래그와 같은 마우스가 영역 밖에 있는 경우에만 기존 동기화 수행
+    if (!isSyncEnabled || isSyncingRef.current || hoveredSide === source) return;
 
     isSyncingRef.current = true;
     const target = source === 'A' ? scrollRefB.current : scrollRefA.current;
     if (target) {
-      // 세로 스크롤(scrollTop)만 동기화하여 좌우 스크롤은 독립적으로 유지
-      target.scrollTop = e.currentTarget.scrollTop;
+      // 스크롤바를 직접 드래그할 때는 저장된 오프셋을 유지하며 강제 이동
+      const currentScrollTop = e.currentTarget.scrollTop;
+      target.scrollTop = source === 'A' 
+        ? currentScrollTop + syncOffsetRef.current 
+        : currentScrollTop - syncOffsetRef.current;
     }
     
     window.requestAnimationFrame(() => { isSyncingRef.current = false; });
@@ -895,8 +910,9 @@ const CodeComparator: React.FC = () => {
           </button>
           <button 
             onClick={() => {
+              // 동기화 시작 시점에 현재 두 창의 스크롤 차이(Offset)를 저장
               if (!isSyncEnabled && scrollRefA.current && scrollRefB.current) {
-                scrollRefB.current.scrollTop = scrollRefA.current.scrollTop;
+                syncOffsetRef.current = scrollRefB.current.scrollTop - scrollRefA.current.scrollTop;
               }
               setIsSyncEnabled(!isSyncEnabled);
             }}
@@ -952,7 +968,7 @@ const CodeComparator: React.FC = () => {
               className="flex-1 text-[15px] font-mono min-h-0 w-full border-r border-slate-200 overflow-hidden"
             >
               <div className="w-full h-full min-h-0 text-slate-900">
-                {renderCodeContent(codeA, langA, isLoadingA, errorA, 'A', scrollRefA, handleScroll('A'), markActiveScrollSide('A'))}
+                {renderCodeContent(codeA, langA, isLoadingA, errorA, 'A', scrollRefA, handleScroll('A'), handleWheel('A'))}
               </div>
             </div>
           </div>
@@ -1009,7 +1025,7 @@ const CodeComparator: React.FC = () => {
               className="flex-1 text-[15px] font-mono min-h-0 w-full overflow-hidden"
             >
               <div className="w-full h-full min-h-0 text-slate-900">
-                {renderCodeContent(codeB, langB, isLoadingB, errorB, 'B', scrollRefB, handleScroll('B'), markActiveScrollSide('B'))}
+                {renderCodeContent(codeB, langB, isLoadingB, errorB, 'B', scrollRefB, handleScroll('B'), handleWheel('B'))}
               </div>
             </div>
           </div>

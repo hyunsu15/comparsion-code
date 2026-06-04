@@ -205,9 +205,15 @@ const CodeBlock = forwardRef<HTMLDivElement, CodeBlockProps>(({
               return (
                 <div
                   key={lineNum}
+                  data-line={lineNum} // 부모의 Alt+클릭 점프 로직(closest) 지원을 위해 추가
                   onClick={(e) => {
-                    if (e.shiftKey) onLineShiftClick?.(lineNum, e.clientX, e.clientY);
-                    else if (isMethodStart) onFoldToggle?.(lineNum);
+                    if (e.shiftKey) {
+                      e.stopPropagation(); // 중복 처리 방지
+                      onLineShiftClick?.(lineNum, e.clientX, e.clientY);
+                    } else if (isMethodStart && !e.altKey) {
+                      e.stopPropagation(); // 알트 키가 없을 때만 접기를 실행하고 버블링 중단
+                      onFoldToggle?.(lineNum);
+                    }
                   }}
                   className="line flex hover:bg-slate-50 transition-colors absolute top-0 left-0 w-full"
                   style={{ 
