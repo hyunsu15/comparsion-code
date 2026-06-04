@@ -204,8 +204,15 @@ const getCMethodName = (header: string) => {
     .replace(/\bEXEC\s+SQL\b.*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
-  const openParenIndex = normalizedHeader.indexOf('(');
 
+  // 1. 구조체(struct) 체크
+  if (normalizedHeader.includes('struct')) {
+    const structMatch = normalizedHeader.match(/\bstruct\s+([A-Za-z_]\w*)/);
+    return structMatch ? structMatch[1] : 'struct';
+  }
+
+  // 2. 함수 체크
+  const openParenIndex = normalizedHeader.indexOf('(');
   if (openParenIndex < 0) return null;
 
   const beforeParen = normalizedHeader.slice(0, openParenIndex);
@@ -225,7 +232,8 @@ const extractCMethods = (code: string): MethodInfo[] => {
   for (let i = 0; i < lines.length; i++) {
     const lineForDepth = stripCodeForBraces(lines[i], commentState);
 
-    if (topLevelDepth === 0 && lineForDepth.includes('(')) {
+    // 함수('(') 또는 구조체('struct') 키워드 감지
+    if (topLevelDepth === 0 && (lineForDepth.includes('(') || lineForDepth.includes('struct'))) {
       const headerLines: string[] = [];
       let headerEndIndex = i;
       let foundBody = false;
@@ -512,91 +520,6 @@ const CodeComparator: React.FC = () => {
     }
   }, [methodsA, methodsB, methodMatches, scrollToLine, toggleFold, threadsB]);
 
-  // 접기 상태 시각화 및 라인 숨김 적용
-  useEffect(() => {
-    const applyFolding = (ref: React.RefObject<HTMLDivElement>, methods: MethodInfo[], foldedSet: Set<number>) => {
-      if (!ref.current) return;
-
-      // 모든 라인 초기화
-      const allLines = ref.current.querySelectorAll('[data-line]');
-      allLines.forEach(el => {
-        (el as HTMLElement).style.display = 'flex';
-        el.classList.remove('method-folded');
-        const foldIndicator = el.querySelector('.fold-indicator');
-        if (foldIndicator) foldIndicator.remove();
-        const dsMarker = el.querySelector('.ds-marker');
-        if (dsMarker) dsMarker.remove();
-      });
-
-      methods.forEach(method => {
-        const startEl = ref.current?.querySelector(`[data-line="${method.line}"]`) as HTMLElement;
-        if (!startEl) return;
-
-        startEl.style.cursor = 'pointer';
-        
-        if (foldedSet.has(method.line)) {
-          startEl.classList.add('method-folded');
-          // [+] 표시 추가
-          const indicator = document.createElement('span');
-          indicator.className = 'fold-indicator mr-2 text-blue-500 font-bold bg-blue-50 px-1 rounded text-[13px] flex-shrink-0';
-          indicator.innerText = '[ + folded ]';
-          indicator.title = '클릭하여 메서드 펼치기';
-          startEl.prepend(indicator);
-
-          // 내부 라인 숨기기
-          for (let i = method.line + 1; i <= method.endLine; i++) {
-            const lineToHide = ref.current?.querySelector(`[data-line="${i}"]`) as HTMLElement;
-            if (lineToHide) lineToHide.style.display = 'none';
-          }
-        }
-      });
-
-      // 다크소울 메시지 마커 추가 (PB5 영역)
-      if (ref === scrollRefB) {
-        threadsB.forEach(t => {
-          const el = ref.current?.querySelector(`[data-line="${t.line_number}"]`) as HTMLElement;
-          if (el) {
-            const marker = document.createElement('span');
-            const isResolved = t.status === 'RESOLVED';
-            const colorClass = t.status === 'CHECK_PB5' 
-              ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]' 
-              : t.status === 'CHECK_PB'
-                ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]'
-                : 'bg-slate-400';
-
-            marker.className = `ds-marker mr-2 inline-block w-3 h-3 rounded-full ${colorClass} ${isResolved ? '' : 'animate-pulse'} cursor-pointer flex-shrink-0 transition-all`;
-            marker.setAttribute('data-thread-id', t.id.toString());
-
-            // 상태별 안내 툴팁 추가
-            let statusDesc = '';
-            if (t.status === 'CHECK_PB5') statusDesc = 'PB가 의견을 남겼습니다. (PB5 확인 필요)';
-            else if (t.status === 'CHECK_PB') statusDesc = 'PB5가 의견을 남겼습니다. (PB 확인 필요)';
-            else if (isResolved) statusDesc = '해결된 이슈입니다.';
-
-            marker.title = `${statusDesc}\n클릭하여 대화 보기`;
-
-            el.prepend(marker);
-          }
-        });
-      }
-    };
-
-    applyFolding(scrollRefA, methodsA, foldedA);
-    applyFolding(scrollRefB, methodsB, foldedB);
-  }, [
-    foldedA, 
-    foldedB, 
-    methodsA, 
-    methodsB, 
-    codeA, 
-    codeB, 
-    isMounted, 
-    threadsB, 
-    !!activeThread, // 모달이 열리거나 닫힐 때 마커 재적용
-    !!isCommentInputOpen,
-    highlightCount // 코드 하이라이팅이 완료되었을 때 마커 재적용
-  ]);
-
   const foldAll = (side: 'A' | 'B', fold: boolean) => {
     const methods = side === 'A' ? methodsA : methodsB;
     const setter = side === 'A' ? setFoldedA : setFoldedB;
@@ -801,7 +724,7 @@ const CodeComparator: React.FC = () => {
   const handleHighlight = useCallback(() => setHighlightCount(prev => prev + 1), []);
 
   // HTML 소스인지 판별 (단순 확장자 체크 또는 내용 체크)
-  const renderCodeContent = (code: string, lang: string, isLoading: boolean, error: string | null) => {
+  const renderCodeContent = (code: string, lang: string, isLoading: boolean, error: string | null, side: 'A' | 'B') => {
     if (isLoading) return <div className="text-gray-400 font-mono text-xs p-4 animate-pulse">Loading source code...</div>;
     if (error) return <div className="font-mono text-xs p-4 italic text-red-500 font-bold">Load failed: {error}</div>;
     if (!code) return <div className="font-mono text-xs p-4 italic text-gray-400">Load source code.</div>;
@@ -817,7 +740,29 @@ const CodeComparator: React.FC = () => {
       );
     }
 
-    return <CodeBlock code={code} lang={lang} onHighlight={handleHighlight} fontSize={fontSize} />;
+    return (
+      <CodeBlock 
+        code={code} 
+        lang={lang} 
+        onHighlight={handleHighlight} 
+        fontSize={fontSize}
+        methods={side === 'A' ? methodsA : methodsB}
+        foldedLines={side === 'A' ? foldedA : foldedB}
+        threads={side === 'B' ? threadsB : []}
+        onFoldToggle={(line) => toggleFold(side, line)}
+        onMarkerClick={(id, x, y) => {
+          const thread = threadsB.find(t => t.id === id);
+          if (thread) {
+            discussionService.getMessages(activePresetKey, id).then(msgs => {
+              setActiveThread({ thread, messages: msgs, x: x - 160, y: y - 100 });
+            });
+          }
+        }}
+        onLineShiftClick={(line, x, y) => {
+          if (side === 'B') setIsCommentInputOpen({ line, x: x - 160, y: y - 100 });
+        }}
+      />
+    );
   };
 
   return (
@@ -934,7 +879,7 @@ const CodeComparator: React.FC = () => {
               className="flex-1 overflow-auto text-[15px] font-mono min-h-0 w-full border-r border-slate-200"
             >
               <div className="w-full text-slate-900">
-                {renderCodeContent(codeA, langA, isLoadingA, errorA)}
+                {renderCodeContent(codeA, langA, isLoadingA, errorA, 'A')}
               </div>
             </div>
           </div>
@@ -974,7 +919,7 @@ const CodeComparator: React.FC = () => {
               className="flex-1 overflow-auto text-[15px] font-mono min-h-0 w-full"
             >
               <div className="w-full text-slate-900">
-                {renderCodeContent(codeB, langB, isLoadingB, errorB)}
+                {renderCodeContent(codeB, langB, isLoadingB, errorB, 'B')}
               </div>
             </div>
           </div>
