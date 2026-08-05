@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { DiscussionThread } from './discussionService';
+import type { DiscussionThread } from '../discussionService';
+import { buildSearchSegments } from './codeSearch';
+import { lineMarkerSummary } from './markerSummary';
 
 interface MethodInfo {
   name: string;
@@ -16,17 +18,27 @@ type CodeBlockProps = {
   foldedLines?: Set<number>;
   methods?: MethodInfo[];
   threads?: DiscussionThread[];
-  onMarkerClick?: (threadId: number, x: number, y: number) => void;
+  onMarkerClick?: (threads: DiscussionThread[], x: number, y: number) => void;
   onFoldToggle?: (line: number) => void;
   onLineShiftClick?: (line: number, x: number, y: number) => void;
   onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
   onWheel?: (e: React.WheelEvent<HTMLDivElement>) => void;
+  // IDE식 코드 검색: 검색어/대소문자 옵션/현재(active) 매치 위치
+  searchQuery?: string;
+  searchCaseSensitive?: boolean;
+  activeMatch?: { line: number; start: number } | null;
+  mapperCallLines?: Set<number>; // PB5 매퍼 호출 줄(클릭 시 대응 SQL) — hover 안내·커서 표시용
 };
 
 export interface CodeBlockHandle {
-  scrollToLine: (lineNum: number) => void;
+  scrollToLine: (lineNum: number) => boolean;
   getScrollElement: () => HTMLDivElement | null;
 }
+
+// Shiki codeToTokens 가 돌려주는 토큰(한 줄 = 토큰 배열, 전체 = 그 배열의 배열).
+type Token = { content: string; color?: string; fontStyle?: number };
+// 접힘을 반영해 실제로 그릴 줄 — 그 줄의 토큰들 + 원본 줄 번호(1-base).
+type VisibleLine = { tokens: Token[]; lineNum: number };
 
 type Highlighter = {
   codeToHtml: (
@@ -46,7 +58,7 @@ type Highlighter = {
       theme: string;
     }
   ) => {
-    tokens: Array<Array<{ content: string; color?: string; fontStyle?: number }>>;
+    tokens: Token[][];
   };
 };
 
@@ -70,6 +82,8 @@ const getHighlighter = (() => {
       import('@shikijs/langs/jsx'),
       import('@shikijs/langs/tsx'),
       import('@shikijs/langs/typescript'),
+      import('@shikijs/langs/xml'),
+      import('@shikijs/langs/sql'),
       import('@shikijs/themes/github-light'),
       import('shiki/core'),
       import('shiki/engine/javascript'),
@@ -83,6 +97,8 @@ const getHighlighter = (() => {
       jsx,
       tsx,
       typescript,
+      xml,
+      sql,
       githubLight,
       core,
       engine,
@@ -98,6 +114,8 @@ const getHighlighter = (() => {
         jsx.default,
         tsx.default,
         typescript.default,
+        xml.default,
+        sql.default,
       ],
       engine: engine.createJavaScriptRegexEngine(),
     }));
@@ -118,9 +136,13 @@ const CodeBlock = forwardRef<CodeBlockHandle, CodeBlockProps>(({
   onFoldToggle,
   onLineShiftClick,
   onScroll: externalOnScroll,
-  onWheel: externalOnWheel
+  onWheel: externalOnWheel,
+  searchQuery = '',
+  searchCaseSensitive = false,
+  activeMatch = null,
+  mapperCallLines = new Set(),
 }, ref) => {
-  const [tokens, setTokens] = useState<any[][]>([]);
+  const [tokens, setTokens] = useState<Token[][]>([]);
   const [hasError, setHasError] = useState(false);
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
   const internalRef = useRef<HTMLDivElement>(null);
@@ -128,12 +150,12 @@ const CodeBlock = forwardRef<CodeBlockHandle, CodeBlockProps>(({
   useImperativeHandle(ref, () => ({
     scrollToLine: (lineNum: number) => {
       const index = visibleLines.findIndex(l => l.lineNum === lineNum);
-      if (index !== -1) {
-        virtualizer.scrollToIndex(index, { align: 'center', behavior: 'smooth' });
-        // 시각적 피드백: 잠시 강조
-        setHighlightedLine(lineNum);
-        setTimeout(() => setHighlightedLine(null), 2000);
-      }
+      if (index === -1) return false; // 접혀있거나 아직 렌더 전이라 대상 라인을 못 찾음
+      virtualizer.scrollToIndex(index, { align: 'center', behavior: 'smooth' });
+      // 시각적 피드백: 잠시 강조
+      setHighlightedLine(lineNum);
+      setTimeout(() => setHighlightedLine(null), 2000);
+      return true;
     },
     getScrollElement: () => internalRef.current
   }));
@@ -167,7 +189,7 @@ const CodeBlock = forwardRef<CodeBlockHandle, CodeBlockProps>(({
 
   // 실제로 화면에 그려야 할 라인 계산 (접힌 라인 제외)
   const visibleLines = useMemo(() => {
-    const lines: any[] = [];
+    const lines: VisibleLine[] = [];
     let currentSkipUntil = -1;
 
     tokens.forEach((lineTokens, idx) => {
@@ -218,11 +240,13 @@ const CodeBlock = forwardRef<CodeBlockHandle, CodeBlockProps>(({
               const isMethodStart = methods.some(m => m.line === lineNum);
               const isFolded = foldedLines.has(lineNum);
               const lineThreads = threads.filter(t => t.line_number === lineNum);
+              const isMapperCall = mapperCallLines.has(lineNum);
 
               return (
                 <div
                   key={lineNum}
                   data-line={lineNum} // 부모의 Alt+클릭 점프 로직(closest) 지원을 위해 추가
+                  title={isMapperCall ? '클릭하면 대응 SQL(매퍼 XML) 보기' : undefined}
                   onClick={(e) => {
                     if (e.shiftKey) {
                       e.stopPropagation(); // 중복 처리 방지
@@ -232,11 +256,11 @@ const CodeBlock = forwardRef<CodeBlockHandle, CodeBlockProps>(({
                       onFoldToggle?.(lineNum);
                     }
                   }}
-                  className="line flex hover:bg-slate-50 transition-colors absolute top-0 left-0 w-full"
+                  className={`line flex transition-colors absolute top-0 left-0 w-full ${isMapperCall ? 'bg-indigo-50/50 hover:bg-indigo-100/70' : 'hover:bg-slate-50'}`}
                   style={{
-                    height: `${virtualRow.size}px`, 
-                    lineHeight: `${virtualRow.size}px`, 
-                    cursor: isMethodStart ? 'pointer' : 'default',
+                    height: `${virtualRow.size}px`,
+                    lineHeight: `${virtualRow.size}px`,
+                    cursor: isMethodStart || isMapperCall ? 'pointer' : 'default',
                     backgroundColor: highlightedLine === lineNum ? 'rgba(255, 255, 0, 0.3)' : undefined,
                     transform: `translateY(${virtualRow.start}px)`
                   }}
@@ -250,16 +274,26 @@ const CodeBlock = forwardRef<CodeBlockHandle, CodeBlockProps>(({
                       </span>
                     )}
                     
-                    <div className="flex gap-0.5 items-center mr-1.5 overflow-hidden">
-                      {lineThreads.map(thread => (
-                        <div 
-                          key={thread.id}
-                          onClick={(e) => { e.stopPropagation(); onMarkerClick?.(thread.id, e.clientX, e.clientY); }}
-                          className={`w-2 h-2 rounded-full flex-shrink-0 cursor-pointer ${thread.status === 'RESOLVED' ? 'bg-slate-300' : 'bg-indigo-500 animate-pulse'}`}
-                          title={`Thread #${thread.id}`}
-                        />
-                      ))}
-                    </div>
+                    {lineThreads.length > 0 && (() => {
+                      const sum = lineMarkerSummary(lineThreads);
+                      const dotClass =
+                        sum.status === 'RESOLVED'
+                          ? 'bg-slate-300'
+                          : sum.status === 'CHECK_PB'
+                            ? 'bg-indigo-500 animate-pulse' // PB 토글과 동일(indigo)
+                            : 'bg-emerald-500 animate-pulse'; // PB5 토글과 동일(emerald)
+                      return (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onMarkerClick?.(lineThreads, e.clientX, e.clientY); }}
+                          className="flex items-center gap-0.5 mr-1.5 cursor-pointer"
+                          title={`스레드 ${sum.count}개`}
+                        >
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotClass}`} />
+                          {sum.count > 1 && <span className="text-[10px] font-black text-slate-500 leading-none">{sum.count}</span>}
+                        </button>
+                      );
+                    })()}
                     {lineNum}
                   </div>
 
@@ -270,23 +304,38 @@ const CodeBlock = forwardRef<CodeBlockHandle, CodeBlockProps>(({
                       tabSize: 4
                     }}
                   >
-                    {lineTokens.map((token: any, tIdx: number) => (
-                      <span 
-                        key={tIdx} 
-                        style={{ 
-                          color: token.color,
-                          fontWeight: (token.fontStyle & 1) ? 'bold' : 'normal',
-                          fontStyle: (token.fontStyle & 2) ? 'italic' : 'normal',
-                          textDecoration: (token.fontStyle & 4) ? 'underline' : 'none'
-                        }}
-                      >
-                        {token.content}
-                      </span>
-                    ))}
+                    {buildSearchSegments(
+                      lineTokens,
+                      searchQuery,
+                      searchCaseSensitive,
+                      searchQuery && activeMatch && activeMatch.line === lineNum ? activeMatch.start : null,
+                    ).map((seg, tIdx: number) => {
+                      const fs = seg.fontStyle ?? 0;
+                      return (
+                        <span
+                          key={tIdx}
+                          style={{
+                            color: seg.hl === 'active' ? '#1a1a1a' : seg.color,
+                            fontWeight: (fs & 1) ? 'bold' : 'normal',
+                            fontStyle: (fs & 2) ? 'italic' : 'normal',
+                            textDecoration: (fs & 4) ? 'underline' : 'none',
+                            backgroundColor:
+                              seg.hl === 'active'
+                                ? 'rgba(255,140,0,0.85)'
+                                : seg.hl === 'match'
+                                  ? 'rgba(250,220,0,0.45)'
+                                  : undefined,
+                            borderRadius: seg.hl !== 'none' ? '2px' : undefined,
+                          }}
+                        >
+                          {seg.content}
+                        </span>
+                      );
+                    })}
                     {/* Folded hint displayed AFTER the code line */}
                     {isFolded && (
                       <span className="ml-4 text-blue-400 text-[11px] italic bg-blue-50 px-2 rounded-full border border-blue-100">
-                        ... method folded
+                        ··· 접힘
                       </span>
                     )}
                   </div>

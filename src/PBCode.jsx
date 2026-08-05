@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import CodeBlock from './CodeBlock';
+import CodeBlock from './codeview/CodeBlock';
 
 const getLangFromFileName = (fileName) => {
   const ext = fileName.split('.').pop()?.toLowerCase();
