@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist
+dist_next
 dist-ssr
 *.local
 
@@ -25,3 +26,6 @@ dist-ssr
 
 server/*
 
+
+# Claude Code 개인 설정 (공유하지 않음)
+.claude/settings.local.json
