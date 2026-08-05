@@ -1,0 +1,86 @@
+/*=============================================================================
+ *  MEMBER001 : 사원 인증 / 권한 확인
+ *=============================================================================*/
+#include <stdio.h>
+#include <string.h>
+#include "kscom_common.h"
+#include "member_common.h"
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+    char    h_emp_no[11];
+    char    h_emp_nm[41];
+    char    h_passwd[65];
+    int     h_fail_cnt;
+    char    h_auth_grade[2];
+EXEC SQL END DECLARE SECTION;
+
+static int emp_grade_select(char *emp_no);
+
+/*---------------------------------------------------------------------------
+ * 사원 인증 — 사번/비밀번호를 확인하고 권한 등급을 돌려준다.
+ *-------------------------------------------------------------------------*/
+int emp_auth_check(EMP_AUTH_REQ *req, EMP_AUTH_RES *res)
+{
+    char enc_passwd[65];
+
+    strcpy(h_emp_no, req->emp_no);
+
+    EXEC SQL SELECT EMP_NM, PASSWD, FAIL_CNT
+               INTO :h_emp_nm, :h_passwd, :h_fail_cnt
+               FROM TB_EMP_MST
+              WHERE EMP_NO = :h_emp_no;
+
+    if (SQLCODE != 0) {
+        set_err_msg(res->msg, "E0201", "사원정보가 존재하지 않습니다.");
+        return -1;
+    }
+
+    sha256(req->passwd, enc_passwd);
+
+    if (strcmp(h_passwd, enc_passwd) != 0) {
+        EXEC SQL UPDATE TB_EMP_MST
+                    SET FAIL_CNT = FAIL_CNT + 1
+                  WHERE EMP_NO   = :h_emp_no;
+        EXEC SQL COMMIT WORK;
+        set_err_msg(res->msg, "E0202", "비밀번호가 일치하지 않습니다.");
+        return -1;
+    }
+
+    if (h_fail_cnt >= 5) {
+        set_err_msg(res->msg, "E0203", "비밀번호 오류 5회 초과입니다.");
+        return -1;
+    }
+
+    if (emp_grade_select(req->emp_no) != 0) {
+        strcpy(h_auth_grade, "9");
+    }
+
+    EXEC SQL UPDATE TB_EMP_MST
+                SET LAST_LOGIN_DTM = SYSDATE,
+                    FAIL_CNT       = 0
+              WHERE EMP_NO         = :h_emp_no;
+
+    EXEC SQL COMMIT WORK;
+
+    strcpy(res->emp_nm,     h_emp_nm);
+    strcpy(res->auth_grade, h_auth_grade);
+    return 0;
+}
+
+/*---------------------------------------------------------------------------
+ * 권한 등급 조회
+ *-------------------------------------------------------------------------*/
+static int emp_grade_select(char *emp_no)
+{
+    strcpy(h_emp_no, emp_no);
+
+    EXEC SQL SELECT AUTH_GRADE
+               INTO :h_auth_grade
+               FROM TB_EMP_AUTH
+              WHERE EMP_NO = :h_emp_no;
+
+    if (SQLCODE != 0) return -1;
+    return 0;
+}

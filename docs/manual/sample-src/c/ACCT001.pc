@@ -1,0 +1,166 @@
+/*=============================================================================
+ *  ACCT001 : 계좌 신규 등록 온라인 거래
+ *  ---------------------------------------------------------------------------
+ *  작성   : 2019.03.11
+ *  개요   : 고객 정보를 확인한 뒤 신규 계좌를 채번하여 계좌원장에 등록한다.
+ *           등록 후 거래내역(TB_ACCT_HIS)에 개설 이력을 남긴다.
+ *===========================================================================*/
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "kscom_common.h"
+#include "acct_common.h"
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+    char    h_cust_id[11];
+    char    h_cust_nm[41];
+    char    h_acct_no[14];
+    char    h_acct_seq[5];
+    char    h_prod_cd[7];
+    char    h_open_br[6];
+    double  h_open_amt;
+    char    h_open_dt[9];
+    char    h_reg_id[11];
+EXEC SQL END DECLARE SECTION;
+
+static int  select_cust_info(char *cust_id);
+static int  select_next_acct_seq(char *prod_cd);
+static int  insert_acct_mst(ACCT_OPEN_REQ *req);
+static int  insert_acct_his(ACCT_OPEN_REQ *req);
+static int  update_cust_acct_cnt(char *cust_id);
+
+/*---------------------------------------------------------------------------
+ * 메인 진입점 — 온라인 거래 프레임워크가 호출한다.
+ *-------------------------------------------------------------------------*/
+int acct001_main(ACCT_OPEN_REQ *req, ACCT_OPEN_RES *res)
+{
+    int rc = 0;
+
+    memset(res, 0x00, sizeof(ACCT_OPEN_RES));
+
+    rc = select_cust_info(req->cust_id);
+    if (rc != 0) {
+        set_err_msg(res->msg, "E0101", "고객정보가 존재하지 않습니다.");
+        return rc;
+    }
+
+    rc = select_next_acct_seq(req->prod_cd);
+    if (rc != 0) {
+        set_err_msg(res->msg, "E0102", "계좌번호 채번에 실패했습니다.");
+        return rc;
+    }
+
+    sprintf(req->acct_no, "%s%s%s", req->open_br, req->prod_cd, h_acct_seq);
+
+    rc = insert_acct_mst(req);
+    if (rc != 0) {
+        EXEC SQL ROLLBACK WORK;
+        set_err_msg(res->msg, "E0103", "계좌원장 등록에 실패했습니다.");
+        return rc;
+    }
+
+    rc = insert_acct_his(req);
+    if (rc != 0) {
+        EXEC SQL ROLLBACK WORK;
+        set_err_msg(res->msg, "E0104", "거래이력 등록에 실패했습니다.");
+        return rc;
+    }
+
+    rc = update_cust_acct_cnt(req->cust_id);
+    if (rc != 0) {
+        EXEC SQL ROLLBACK WORK;
+        set_err_msg(res->msg, "E0105", "고객 계좌수 갱신에 실패했습니다.");
+        return rc;
+    }
+
+    EXEC SQL COMMIT WORK;
+
+    strcpy(res->acct_no, req->acct_no);
+    strcpy(res->cust_nm, h_cust_nm);
+    return 0;
+}
+
+/*---------------------------------------------------------------------------
+ * 고객 기본정보 조회
+ *-------------------------------------------------------------------------*/
+static int select_cust_info(char *cust_id)
+{
+    strcpy(h_cust_id, cust_id);
+
+    EXEC SQL SELECT CUST_NM
+               INTO :h_cust_nm
+               FROM TB_CUST_MST
+              WHERE CUST_ID   = :h_cust_id
+                AND DEL_YN    = 'N';
+
+    if (SQLCODE != 0) {
+        write_log("select_cust_info fail. SQLCODE=%d", SQLCODE);
+        return -1;
+    }
+    return 0;
+}
+
+/*---------------------------------------------------------------------------
+ * 상품별 계좌 일련번호 채번
+ *-------------------------------------------------------------------------*/
+static int select_next_acct_seq(char *prod_cd)
+{
+    strcpy(h_prod_cd, prod_cd);
+
+    EXEC SQL SELECT LPAD(TO_CHAR(NVL(MAX(TO_NUMBER(ACCT_SEQ)), 0) + 1), 4, '0')
+               INTO :h_acct_seq
+               FROM TB_ACCT_SEQ
+              WHERE PROD_CD = :h_prod_cd;
+
+    if (SQLCODE != 0) return -1;
+    return 0;
+}
+
+/*---------------------------------------------------------------------------
+ * 계좌원장 등록
+ *-------------------------------------------------------------------------*/
+static int insert_acct_mst(ACCT_OPEN_REQ *req)
+{
+    strcpy(h_acct_no, req->acct_no);
+    strcpy(h_open_br, req->open_br);
+    strcpy(h_reg_id,  req->reg_id);
+    h_open_amt = req->open_amt;
+
+    EXEC SQL INSERT INTO TB_ACCT_MST
+                  ( ACCT_NO,   CUST_ID,   PROD_CD,  OPEN_BR,
+                    OPEN_AMT,  ACCT_STAT, OPEN_DT,  REG_ID,   REG_DTM )
+           VALUES ( :h_acct_no, :h_cust_id, :h_prod_cd, :h_open_br,
+                    :h_open_amt, '1', TO_CHAR(SYSDATE,'YYYYMMDD'), :h_reg_id, SYSDATE );
+
+    if (SQLCODE != 0) return -1;
+    return 0;
+}
+
+/*---------------------------------------------------------------------------
+ * 계좌 개설 이력 등록
+ *-------------------------------------------------------------------------*/
+static int insert_acct_his(ACCT_OPEN_REQ *req)
+{
+    EXEC SQL INSERT INTO TB_ACCT_HIS
+                  ( ACCT_NO,    TRAN_CD, TRAN_AMT,   TRAN_DTM, REG_ID )
+           VALUES ( :h_acct_no, '0100',  :h_open_amt, SYSDATE,  :h_reg_id );
+
+    if (SQLCODE != 0) return -1;
+    return 0;
+}
+
+/*---------------------------------------------------------------------------
+ * 고객 보유 계좌수 갱신
+ *-------------------------------------------------------------------------*/
+static int update_cust_acct_cnt(char *cust_id)
+{
+    EXEC SQL UPDATE TB_CUST_MST
+                SET ACCT_CNT = ACCT_CNT + 1,
+                    UPD_DTM  = SYSDATE
+              WHERE CUST_ID  = :h_cust_id;
+
+    if (SQLCODE != 0) return -1;
+    return 0;
+}

@@ -1,0 +1,100 @@
+/*=============================================================================
+ *  sqlw_Acct.pc : 계좌 업무 공용 SQL 모듈
+ *  ---------------------------------------------------------------------------
+ *  계좌 관련 온라인 거래가 공통으로 호출하는 EXEC SQL 모음.
+ *  PB5(MyBatis AcctMapper.xml) 와 1:1 로 대응된다.
+ *===========================================================================*/
+#include "kscom_common.h"
+#include "acct_common.h"
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+    char    h_cust_id[11];
+    char    h_cust_nm[41];
+    int     h_acct_cnt;
+    char    h_acct_no[14];
+    char    h_acct_seq[5];
+    char    h_prod_cd[7];
+    char    h_open_br[6];
+    double  h_open_amt;
+    char    h_tran_cd[5];
+    char    h_reg_id[11];
+EXEC SQL END DECLARE SECTION;
+
+/*---------------------------------------------------------------------------
+ * 고객 기본정보 조회  ↔  AcctMapper.selectCustInfo
+ *-------------------------------------------------------------------------*/
+int pb_select_cust_info(char *cust_id, CUST_INFO *out)
+{
+    strcpy(h_cust_id, cust_id);
+
+    EXEC SQL SELECT CUST_ID, CUST_NM, ACCT_CNT
+               INTO :h_cust_id, :h_cust_nm, :h_acct_cnt
+               FROM TB_CUST_MST
+              WHERE CUST_ID = :h_cust_id
+                AND DEL_YN  = 'N';
+
+    if (SQLCODE != 0) return -1;
+
+    strcpy(out->cust_id, h_cust_id);
+    strcpy(out->cust_nm, h_cust_nm);
+    out->acct_cnt = h_acct_cnt;
+    return 0;
+}
+
+/*---------------------------------------------------------------------------
+ * 계좌원장 등록  ↔  AcctMapper.insertAcctMst
+ *-------------------------------------------------------------------------*/
+int pb_insert_acct_mst(ACCT_MST *mst)
+{
+    strcpy(h_acct_no, mst->acct_no);
+    strcpy(h_cust_id, mst->cust_id);
+    strcpy(h_prod_cd, mst->prod_cd);
+    strcpy(h_open_br, mst->open_br);
+    strcpy(h_reg_id,  mst->reg_id);
+    h_open_amt = mst->open_amt;
+
+    EXEC SQL INSERT INTO TB_ACCT_MST
+                  ( ACCT_NO,   CUST_ID,   PROD_CD,   OPEN_BR,
+                    OPEN_AMT,  ACCT_STAT, OPEN_DT,   REG_ID,   REG_DTM )
+           VALUES ( :h_acct_no, :h_cust_id, :h_prod_cd, :h_open_br,
+                    :h_open_amt, '1', TO_CHAR(SYSDATE,'YYYYMMDD'), :h_reg_id, SYSDATE );
+
+    if (SQLCODE != 0) return -1;
+    return 0;
+}
+
+/*---------------------------------------------------------------------------
+ * 계좌 개설 이력 등록  ↔  AcctMapper.insertAcctHis
+ *-------------------------------------------------------------------------*/
+int pb_insert_acct_his(ACCT_HIS *his)
+{
+    strcpy(h_acct_no, his->acct_no);
+    strcpy(h_tran_cd, his->tran_cd);
+    strcpy(h_reg_id,  his->reg_id);
+    h_open_amt = his->tran_amt;
+
+    EXEC SQL INSERT INTO TB_ACCT_HIS
+                  ( ACCT_NO,    TRAN_CD,    TRAN_AMT,    TRAN_DTM, REG_ID )
+           VALUES ( :h_acct_no, :h_tran_cd, :h_open_amt, SYSDATE,  :h_reg_id );
+
+    if (SQLCODE != 0) return -1;
+    return 0;
+}
+
+/*---------------------------------------------------------------------------
+ * 고객 보유 계좌수 갱신  ↔  AcctMapper.updateCustAcctCnt
+ *-------------------------------------------------------------------------*/
+int pb_update_cust_acct_cnt(char *cust_id)
+{
+    strcpy(h_cust_id, cust_id);
+
+    EXEC SQL UPDATE TB_CUST_MST
+                SET ACCT_CNT = ACCT_CNT + 1,
+                    UPD_DTM  = SYSDATE
+              WHERE CUST_ID  = :h_cust_id;
+
+    if (SQLCODE != 0) return -1;
+    return 0;
+}
