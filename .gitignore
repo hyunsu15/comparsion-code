@@ -1,0 +1,20 @@
+# 하위 프로젝트는 각자 별도 git 저장소로 관리한다 (중첩 저장소 방지)
+/fe/
+/be/
+
+# 의존성 / 빌드 산출물
+node_modules/
+dist/
+build/
+
+# OS / 편집기
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Claude Code 개인 설정 (공유하지 않음)
+.claude/settings.local.json
+
+# 도구 세션 상태 파일 (일회성)
+.omc/
