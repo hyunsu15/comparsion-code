@@ -4,6 +4,8 @@
 AppleUX가이드와 GOOGLE UX가이드를 읽고 학습한다.
 AppleUI가이드와 GOOGLE UI 가이드를 읽고 학습한다.
 충돌되는 부분은 UI의 경우 Apple UI,Google UI 가이드 순서로 한다. 
+단,transition: all을 사용해서, CSS 변수(var(--color))로 지정된 색상 요소에서 렌더링 스레드가 일시적으로 먹통이 되거나 트랜지션이 아예 멈춰버리는 현상이 생길경우 @property로 CSS 변수 타입 정의한다.
+
 UX 경우 Google UX, Apple UX 순서로 한다.
 
 
