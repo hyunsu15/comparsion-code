@@ -1,20 +1,41 @@
-# 하위 프로젝트는 각자 별도 git 저장소로 관리한다 (중첩 저장소 방지)
-/fe/
-/be/
+# fe(프론트) · be(백엔드) · 문서를 한 저장소에서 관리한다.
 
-# 의존성 / 빌드 산출물
+# ── 의존성 ────────────────────────────────────────────────────────────────
 node_modules/
-dist/
-build/
 
-# OS / 편집기
+# ── 빌드 산출물 ───────────────────────────────────────────────────────────
+fe/dist/
+fe/dist_next/
+fe/dist-ssr/
+be/dist/
+be/build/
+be/coverage/
+# ncc 번들 (npm --prefix be run bundle 로 재생성)
+be/be_next/
+
+# ── 로컬 환경설정 (개인 값) ───────────────────────────────────────────────
+*.local
+.env
+.env.*.local
+
+# ── 로그 ──────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── OS / 편집기 ───────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
 
-# Claude Code 개인 설정 (공유하지 않음)
-.claude/settings.local.json
-
-# 도구 세션 상태 파일 (일회성)
+# ── 도구 세션 상태 파일 (일회성) ──────────────────────────────────────────
 .omc/
+
+# ── Claude Code 개인 설정 (공유하지 않음) ─────────────────────────────────
+.claude/settings.local.json
